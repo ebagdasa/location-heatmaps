@@ -185,10 +185,16 @@ def rebuild_from_vector(vector, tree, image_size, contour=False, threshold=0):
 
         # Build a grid image without filling the regions.
         if contour:
-            current_image[x_bot:x_top + 1, y_bot:y_bot + 1] += 1
-            current_image[x_bot:x_top + 1, y_top:y_top + 1] += 1
-            current_image[x_bot:x_bot + 1, y_bot:y_top + 1] += 1
-            current_image[x_top:x_top + 1, y_bot:y_top + 1] += 1
+            current_image[x_bot:x_top + 1,
+            y_bot - max(1, 5 // prefix_len):y_bot + max(1, 5 // prefix_len)] = 1
+            current_image[x_bot:x_top + 1,
+            y_top - max(1, 5 // prefix_len):y_top + 10 // prefix_len] = 1
+            current_image[
+            x_bot - max(1, 5 // prefix_len):x_bot + 10 // prefix_len,
+            y_bot:y_top + 1] = 1
+            current_image[
+            x_top - max(1, 5 // prefix_len):x_top + 10 // prefix_len,
+            y_bot:y_top + 1] = 1
         else:
             current_image[x_bot:x_top + 1, y_bot:y_top + 1] = count
     return current_image
@@ -277,3 +283,27 @@ def quantize_vector(vector, left_bound, right_bound):
     scale = (vector - left_bound) // distance
     vector -= distance * scale
     return vector
+
+
+def makeGaussian(image, fwhm=3, center=None):
+    """ Make a square gaussian kernel.
+    size is the length of a side of the square
+    fwhm is full-width-half-maximum, which
+    can be thought of as an effective radius.
+    """
+    size = image.shape[0]
+    x = np.arange(0, size, 1, float)
+    y = x[:, np.newaxis]
+
+    if center is None:
+        x0 = y0 = size // 2
+    else:
+        x0 = center[0]
+        y0 = center[1]
+    hotspot = np.exp(-4 * np.log(2) * ((x - x0) ** 2 + (y - y0) ** 2) / fwhm ** 2)
+    image = np.floor(hotspot * image)
+    image = np.floor(hotspot * image)
+    image = (image).astype(int)
+    hotspot[image<5] = 0
+    image[image<5] = 0
+    return image, hotspot

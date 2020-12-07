@@ -24,20 +24,23 @@ image.
 import random
 from typing import List
 
+import os
 import numpy as np
-import tqdm
+from tqdm.notebook import tqdm
 from PIL import Image
 import geo_utils
 import mechanisms
 import metrics
 import plotting
 from matplotlib import pyplot as plt
+import torch
 
 TOPK = 1000
 TOTAL_SIZE = 1024
 
 
-def get_data(path, crop_tuple=(512, 100, 1536, 1124), total_size=1024):
+def get_data(path, crop_tuple=(512, 100, 1536, 1124),
+             total_size=1024, save=True):
     """Download the map image.
 
     Downloads the image from a given path, crops it and transforms into a list
@@ -54,18 +57,23 @@ def get_data(path, crop_tuple=(512, 100, 1536, 1124), total_size=1024):
       np.array of the image and a shuffled list of coordinates.
     """
 
-    with open(path) as f:
+    with open(path, 'rb') as f:
         image = Image.open(f).convert('L')
     image = image.crop(crop_tuple)
     true_image = np.asarray(image)
-    dataset = list()
+    if os.path.isfile('dataset.npy'):
+        dataset = np.load('dataset.npy')
+    else:
+        dataset = np.zeros(true_image.sum(), dtype=[('x', np.int16),('y',np.int16)])
+        z = 0
+        for i in tqdm(range(total_size), total=total_size):
+            for j in range(total_size):
+                for _ in range(int(true_image[i, j])):
+                    dataset[z] = (i, j)
+                    z += 1
+        if save:
+            np.save('dataset', dataset)
 
-    for i in tqdm.tqdm(range(total_size), total=total_size):
-        for j in range(total_size):
-            for _ in range(int(true_image[i, j])):
-                dataset.append([i, j])
-
-    random.shuffle(dataset)
     return true_image, dataset
 
 
@@ -75,6 +83,55 @@ def print_output(text, flag):
     if flag:
         print(text)
 
+def make_step(samples, eps, threshold, partial,
+              prefix_len, dropout_rate, tree, tree_prefix_list,
+              noiser, quantize, total_size):
+
+    samples_len = len(samples)
+    round_vector = np.zeros([partial, prefix_len])
+    sum_vector = np.zeros(prefix_len)
+    for j, sample in enumerate(tqdm(samples, leave=False)):
+        if dropout_rate and random.random() <= dropout_rate:
+            continue
+        round_vector[j % partial] = geo_utils.report_coordinate_to_vector(
+            sample, tree, tree_prefix_list)
+        if j % partial == 0 or j == samples_len - 1:
+            round_vector = noiser.apply_noise(round_vector)
+            if quantize is not None:
+
+                round_vector = geo_utils.quantize_vector(round_vector,
+                                                         -2 ** (
+                                                                 quantize - 1),
+                                                         2 ** (
+                                                                 quantize - 1))
+                sum_vector += geo_utils.quantize_vector(
+                    round_vector.sum(axis=0), -2 ** (quantize - 1),
+                    2 ** (quantize - 1))
+            else:
+                sum_vector += round_vector.sum(axis=0)
+
+            round_vector = np.zeros([partial, prefix_len])
+    del round_vector
+    rebuilder = np.copy(sum_vector)
+    test_image = geo_utils.rebuild_from_vector(
+        rebuilder, tree, image_size=total_size, threshold=threshold)
+    grid_contour = geo_utils.rebuild_from_vector(
+        sum_vector,
+        tree,
+        image_size=total_size,
+        contour=True,
+        threshold=threshold)
+    result = geo_utils.AlgResult(
+        image=test_image,
+        sum_vector=sum_vector,
+        tree=tree,
+        tree_prefix_list=tree_prefix_list,
+        threshold=threshold,
+        grid_contour=grid_contour,
+        eps=eps)
+
+    return result, grid_contour
+
 
 def run_experiment(true_image,
                    dataset,
@@ -82,7 +139,7 @@ def run_experiment(true_image,
                    secagg_round_size=10000,
                    threshold=0,
                    collapse_threshold=None,
-                   eps_func=lambda x: 1,
+                   eps_func=lambda x, y: 1,
                    total_epsilon_budget=None,
                    top_k=TOPK,
                    partial=100,
@@ -128,6 +185,7 @@ def run_experiment(true_image,
 
     tree, tree_prefix_list = geo_utils.init_tree()
     per_level_results = list()
+    per_level_grid = list()
     finished = False
     sum_vector = None
 
@@ -146,7 +204,7 @@ def run_experiment(true_image,
             'Specify either `collapse_threshold` or `collapse_func`.')
 
     for i in range(max_levels):
-        samples = random.sample(dataset, level_sample_size)
+        samples = np.random.choice(dataset, level_sample_size, replace=False)
         samples_len = len(samples)
         prefix_len = len(tree_prefix_list)
         # create an image from the sampled data.
@@ -178,7 +236,7 @@ def run_experiment(true_image,
                     eps = remaining_budget / samples_len
 
             noiser = noise_class(dp_round_size, 1, eps)
-        spent_budget += eps * samples_len
+            spent_budget += eps * samples_len
 
         if threshold_func:
             threshold = threshold_func(
@@ -191,49 +249,12 @@ def run_experiment(true_image,
             f'Collapse threshold: {collapse_threshold:.2f}', output_flag)
 
         # to prevent OOM errors we use vectors of size partial.
-        round_vector = np.zeros([partial, prefix_len])
-        sum_vector = np.zeros(prefix_len)
-        for j, sample in enumerate(tqdm.tqdm(samples)):
-            if dropout_rate and random.random() <= dropout_rate:
-                continue
-            round_vector[j % partial] = geo_utils.report_coordinate_to_vector(
-                sample, tree, tree_prefix_list)
-            if j % partial == 0 or j == samples_len - 1:
-                round_vector = noiser.apply_noise(round_vector)
-                if quantize is not None:
-
-                    round_vector = geo_utils.quantize_vector(round_vector,
-                                                             -2 ** (
-                                                                         quantize - 1),
-                                                             2 ** (
-                                                                         quantize - 1))
-                    sum_vector += geo_utils.quantize_vector(
-                        round_vector.sum(axis=0), -2 ** (quantize - 1),
-                        2 ** (quantize - 1))
-                else:
-                    sum_vector += round_vector.sum(axis=0)
-
-                round_vector = np.zeros([partial, prefix_len])
-        del round_vector
-        rebuilder = np.copy(sum_vector)
-        test_image = geo_utils.rebuild_from_vector(
-            rebuilder, tree, image_size=total_size, threshold=threshold)
-        grid_contour = geo_utils.rebuild_from_vector(
-            sum_vector,
-            tree,
-            image_size=total_size,
-            contour=True,
-            threshold=threshold)
-        result = geo_utils.AlgResult(
-            image=test_image,
-            sum_vector=sum_vector,
-            tree=tree,
-            tree_prefix_list=tree_prefix_list,
-            threshold=threshold,
-            grid_contour=grid_contour,
-            eps=eps)
+        result, grid_contour = make_step(samples, eps, threshold, partial,
+              prefix_len, dropout_rate, tree, tree_prefix_list,
+              noiser, quantize, total_size)
 
         per_level_results.append(result)
+        per_level_grid.append(grid_contour)
 
         # compare to true image without sampling error
         if output_flag:
@@ -245,7 +266,7 @@ def run_experiment(true_image,
             print(f'Level: {i}. MSE without sampling error: {metric.mse:.2e}')
 
         tree, tree_prefix_list, finished = geo_utils.split_regions(
-            tree_prefix_list, sum_vector, threshold, collapse_threshold)
+            result.tree_prefix_list, result.sum_vector, threshold, collapse_threshold)
     if output_flag:
         print(f'Total epsilon-users: {spent_budget:.2f} with ' + \
               f'{spent_budget / level_sample_size:.2f} eps per person. ')
@@ -272,7 +293,7 @@ def run_experiment(true_image,
                 metric=metric)
             ax_contour[i].axes.xaxis.set_visible(False)
             ax_contour[i].axes.yaxis.set_visible(False)
-            ax_contour[i].imshow(grid_contour)
+            ax_contour[i].imshow(per_level_grid[i])
         if save_gif:
             images = [result.image for result in per_level_results]
             plotting.save_gif(images, path='/gif_image/')
