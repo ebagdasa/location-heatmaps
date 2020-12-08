@@ -22,7 +22,9 @@ on some level or a region on the lowest level.
 """
 
 import dataclasses
+import random
 from typing import List
+from tqdm.notebook import tqdm
 
 import numpy as np
 import pygtrie
@@ -307,3 +309,66 @@ def makeGaussian(image, fwhm=3, center=None):
     hotspot[image<5] = 0
     image[image<5] = 0
     return image, hotspot
+
+def convert_to_dataset(image, total_size):
+
+    dataset = np.zeros(image.sum(),
+                       dtype=[('x', np.int16), ('y', np.int16)])
+    z = 0
+    for i in tqdm(range(total_size), total=total_size):
+        for j in range(total_size):
+            for _ in range(int(image[i, j])):
+                dataset[z] = (i, j)
+                z += 1
+
+    return dataset
+
+
+def make_step(samples, eps, threshold, partial,
+              prefix_len, dropout_rate, tree, tree_prefix_list,
+              noiser, quantize, total_size):
+
+    samples_len = len(samples)
+    round_vector = np.zeros([partial, prefix_len])
+    sum_vector = np.zeros(prefix_len)
+    for j, sample in enumerate(tqdm(samples, leave=False)):
+        if dropout_rate and random.random() <= dropout_rate:
+            continue
+        round_vector[j % partial] = report_coordinate_to_vector(
+            sample, tree, tree_prefix_list)
+        if j % partial == 0 or j == samples_len - 1:
+            round_vector = noiser.apply_noise(round_vector)
+            if quantize is not None:
+
+                round_vector = quantize_vector(round_vector,
+                                                         -2 ** (
+                                                                 quantize - 1),
+                                                         2 ** (
+                                                                 quantize - 1))
+                sum_vector += quantize_vector(
+                    round_vector.sum(axis=0), -2 ** (quantize - 1),
+                    2 ** (quantize - 1))
+            else:
+                sum_vector += round_vector.sum(axis=0)
+
+            round_vector = np.zeros([partial, prefix_len])
+    del round_vector
+    rebuilder = np.copy(sum_vector)
+    test_image = rebuild_from_vector(
+        rebuilder, tree, image_size=total_size, threshold=threshold)
+    grid_contour = rebuild_from_vector(
+        sum_vector,
+        tree,
+        image_size=total_size,
+        contour=True,
+        threshold=threshold)
+    result = AlgResult(
+        image=test_image,
+        sum_vector=sum_vector,
+        tree=tree,
+        tree_prefix_list=tree_prefix_list,
+        threshold=threshold,
+        grid_contour=grid_contour,
+        eps=eps)
+
+    return result, grid_contour
