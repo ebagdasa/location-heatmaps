@@ -66,7 +66,7 @@ def plot_it(ax, test_image, eps, total_regions, metric: metrics.Metrics):
                  '\n' + f'WS: {metric.wasserstein:.2e}. ' +
                  f'Mutual: {metric.mutual_info:.3f}.' + '\n' +
                  f'MSE: {metric.mse:.2e}')
-    ax.imshow(test_image)
+    ax.imshow(test_image, interpolation='bilinear')
     return
 
 

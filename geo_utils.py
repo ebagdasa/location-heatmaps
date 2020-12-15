@@ -32,6 +32,19 @@ import pygtrie
 DEFAULT_CHILDREN = ['00', '01', '10', '11']
 
 
+def get_default_children(positivity, split=None):
+    if positivity:
+        if split == 'pos':
+            return ['001', '011', '101', '111']
+        elif split == 'neg':
+            return ['000', '010', '100', '110']
+        else:
+            return ['000', '001', '010', '011',
+                    '100', '101', '110', '111']
+    else:
+        return ['00', '01', '10', '11']
+
+
 @dataclasses.dataclass
 class AlgResult:
     """Main result object.
@@ -52,6 +65,8 @@ class AlgResult:
     threshold: float
     grid_contour: np.ndarray
     eps: float
+    pos_image: np.ndarray = None
+    neg_image: np.ndarray = None
 
 
 def coordinates_to_binary_path(xy_tuple, depth=10):
@@ -67,10 +82,15 @@ def coordinates_to_binary_path(xy_tuple, depth=10):
     Returns:
       binary version of the coordinate.
     """
-    x_coord, y_coord = xy_tuple
+    if len(xy_tuple) == 2:
+        x_coord, y_coord = xy_tuple
+        positivity = False
+        pos = ''
+    else:
+        x_coord, y_coord, pos = xy_tuple
     path = ''
     for j in reversed(range(depth)):
-        path += f'{(x_coord >> j) & 1}{(y_coord >> j) & 1}/'
+        path += f'{(x_coord >> j) & 1}{(y_coord >> j) & 1}{pos}/'
     path = path[:-1]
     return path
 
@@ -85,21 +105,24 @@ def binary_path_to_coordinates(path):
       path: binary path of the location ('00/01')
 
     Returns:
-      x coordinate, y coordinate, total bit level.
+      x coordinate, y coordinate, total bit level, pos
     """
 
     x = 0
     y = 0
+    pos = None
     splitted_path = path.split('/')
     for xy in splitted_path:
         x = x << 1
         y = y << 1
         x += int(xy[0])
         y += int(xy[1])
-    return (x, y, len(splitted_path))
+        if len(xy) > 2:
+            pos = int(xy[2])
+    return x, y, len(splitted_path), pos
 
 
-def report_coordinate_to_vector(xy, tree, tree_prefix_list):
+def report_coordinate_to_vector(xy, tree, tree_prefix_list, positivity):
     """Converts a coordinate tuple into a one-hot vector using tree."""
 
     vector = np.zeros([len(tree_prefix_list)])
@@ -109,14 +132,14 @@ def report_coordinate_to_vector(xy, tree, tree_prefix_list):
     return vector
 
 
-def init_tree():
+def init_tree(positivity=False):
     """Initializes tree to have four leaf nodes.
 
     Creates pgtrie with leafs from `DEFAULT_CHILDREN` and assigns each node
     a positional identifier using positions from the `DEFAULT_CHILDREN`.
 
     Args:
-      None
+      positivity: Whether to account for pos and neg users.
 
     Returns:
       constructed pygtrie, reverse prefix of the trie.
@@ -124,9 +147,9 @@ def init_tree():
 
     new_tree = pygtrie.StringTrie()
 
-    for i, z in enumerate(DEFAULT_CHILDREN):
+    for i, z in enumerate(get_default_children(positivity)):
         new_tree[z] = i
-    return new_tree, list(DEFAULT_CHILDREN)
+    return new_tree, list(get_default_children(positivity))
 
 
 def transform_region_to_coordinates(x_coord,
@@ -157,7 +180,8 @@ def transform_region_to_coordinates(x_coord,
     return (x_bot, x_top, y_bot, y_top)
 
 
-def rebuild_from_vector(vector, tree, image_size, contour=False, threshold=0):
+def rebuild_from_vector(vector, tree, image_size, contour=False, threshold=0,
+                        positivity=False):
     """Using coordinate vector and the tree produce a resulting image.
 
     For each value in the vector it finds the corresponding prefix and plots the
@@ -175,9 +199,13 @@ def rebuild_from_vector(vector, tree, image_size, contour=False, threshold=0):
     """
     image_bit_level = int(np.log2(image_size))
     current_image = np.zeros([image_size, image_size])
+    pos_image, neg_image = None, None
+    if positivity:
+        pos_image = np.zeros([image_size, image_size])
+        neg_image = np.zeros([image_size, image_size])
     for path in sorted(tree):
         value = vector[tree[path]]
-        (x, y, prefix_len) = binary_path_to_coordinates(path)
+        (x, y, prefix_len, pos) = binary_path_to_coordinates(path)
         (x_bot, x_top, y_bot,
          y_top) = transform_region_to_coordinates(x, y, prefix_len,
                                                   image_bit_level)
@@ -198,15 +226,23 @@ def rebuild_from_vector(vector, tree, image_size, contour=False, threshold=0):
             x_top - max(1, 5 // prefix_len):x_top + 10 // prefix_len,
             y_bot:y_top + 1] = 1
         else:
-            current_image[x_bot:x_top + 1, y_bot:y_top + 1] = count
-    return current_image
+            current_image[x_bot:x_top + 1, y_bot:y_top + 1] += count
+            if positivity:
+                if pos == 1:
+                    pos_image[x_bot:x_top + 1, y_bot:y_top + 1] = count
+                elif pos == 0:
+                    neg_image[x_bot:x_top + 1, y_bot:y_top + 1] = count
+                else:
+                    raise ValueError(f'value: {pos}')
+    return current_image, pos_image, neg_image
 
 
 def split_regions(tree_prefix_list,
                   vector_counts,
                   threshold,
                   image_bit_level,
-                  collapse_threshold=None):
+                  collapse_threshold=None,
+                  positivity=False):
     """Modify the tree by splitting and collapsing the nodes.
 
     This implementation collapses and splits nodes of the tree according to
@@ -228,35 +264,74 @@ def split_regions(tree_prefix_list,
     unchanged = 0
     new_tree_prefix_list = list()
     new_tree = pygtrie.StringTrie()
-    for i, count in enumerate(vector_counts):
-        prefix = tree_prefix_list[i]
+    print(positivity)
+    if positivity:
+        for i in range(0, len(vector_counts), 2):
+            neg_count = vector_counts[i]
+            pos_count = vector_counts[i+1]
+            neg_prefix = tree_prefix_list[i]
+            pos_prefix = tree_prefix_list[i+1]
 
-        # check whether the tree has reached the bottom
-        if len(prefix.split('/')) < image_bit_level:
-            continue
+            # check whether the tree has reached the bottom
+            if len(pos_prefix.split('/')) < image_bit_level:
+                continue
 
-        if count > threshold:
-            for child in DEFAULT_CHILDREN:
-                new_prefix = f'{prefix}/{child}'
-                if not new_tree.has_key(new_prefix):
-                    fresh_expand += 1
-                    new_tree[new_prefix] = len(new_tree_prefix_list)
-                    new_tree_prefix_list.append(new_prefix)
-        else:
-            if collapse_threshold is not None and \
-                    count <= collapse_threshold and \
-                    len(prefix) > 2:
+            total = pos_count + neg_count
+            p = pos_count / total
+            confidence = np.sqrt((1-p)*p/total)
+            # error bound propagation.
+            # confidence +/- noise
+            # pos_count/total +/- (confidence+conf_noise) => 95% interval for 95% noise interval.
 
-                old_prefix = prefix[:-3]
-                collapsed += 1
-                if not new_tree.has_key(old_prefix):
-                    created += 1
-                    new_tree[old_prefix] = len(new_tree_prefix_list)
-                    new_tree_prefix_list.append(old_prefix)
+            if pos_count > threshold and neg_count > threshold:
+                neg_child = get_default_children(positivity, split='neg')
+                pos_child =  get_default_children(positivity, split='pos')
+                for j in range(len(pos_child)):
+                    new_prefix = f'{neg_prefix}/{neg_child[j]}'
+                    if not new_tree.has_key(new_prefix):
+                        fresh_expand += 1
+                        new_tree[new_prefix] = len(new_tree_prefix_list)
+                        new_tree_prefix_list.append(new_prefix)
+
+                        new_prefix = f'{pos_prefix}/{pos_child[j]}'
+                        new_tree[new_prefix] = len(new_tree_prefix_list)
+                        new_tree_prefix_list.append(new_prefix)
             else:
                 unchanged += 1
-                new_tree[f'{prefix}'] = len(new_tree_prefix_list)
-                new_tree_prefix_list.append(f'{prefix}')
+                new_tree[f'{pos_prefix}'] = len(new_tree_prefix_list)
+                new_tree[f'{neg_prefix}'] = len(new_tree_prefix_list)
+                new_tree_prefix_list.append(f'{pos_prefix}')
+                new_tree_prefix_list.append(f'{neg_prefix}')
+    else:
+        for i, count in enumerate(vector_counts):
+            prefix = tree_prefix_list[i]
+
+            # check whether the tree has reached the bottom
+            if len(prefix.split('/')) < image_bit_level:
+                continue
+
+            if count > threshold:
+                for child in DEFAULT_CHILDREN:
+                    new_prefix = f'{prefix}/{child}'
+                    if not new_tree.has_key(new_prefix):
+                        fresh_expand += 1
+                        new_tree[new_prefix] = len(new_tree_prefix_list)
+                        new_tree_prefix_list.append(new_prefix)
+            else:
+                if collapse_threshold is not None and \
+                        count <= collapse_threshold and \
+                        len(prefix) > 2:
+
+                    old_prefix = prefix[:-3]
+                    collapsed += 1
+                    if not new_tree.has_key(old_prefix):
+                        created += 1
+                        new_tree[old_prefix] = len(new_tree_prefix_list)
+                        new_tree_prefix_list.append(old_prefix)
+                else:
+                    unchanged += 1
+                    new_tree[f'{prefix}'] = len(new_tree_prefix_list)
+                    new_tree_prefix_list.append(f'{prefix}')
     finished = False
     if collapse_threshold:
         print(f'Collapsed: {collapsed}, created when collapsing: {created},' + \
@@ -271,7 +346,9 @@ def build_from_sample(samples, total_size):
     """Restores the image from the list of coordinate tuples."""
 
     image = np.zeros([total_size, total_size])
-    for (x, y) in samples:
+    for sample in samples:
+        x = sample[0]
+        y = sample[1]
         image[x, y] += 1
     return image
 
@@ -287,7 +364,8 @@ def quantize_vector(vector, left_bound, right_bound):
     return vector
 
 
-def makeGaussian(image, fwhm=3, center=None):
+def makeGaussian(image, total_size, fwhm=3, center=None,
+                 convert=False, save=False):
     """ Make a square gaussian kernel.
     size is the length of a side of the square
     fwhm is full-width-half-maximum, which
@@ -303,22 +381,41 @@ def makeGaussian(image, fwhm=3, center=None):
         x0 = center[0]
         y0 = center[1]
     hotspot = np.exp(-4 * np.log(2) * ((x - x0) ** 2 + (y - y0) ** 2) / fwhm ** 2)
-    image = np.floor(hotspot * image)
-    image = np.floor(hotspot * image)
-    image = (image).astype(int)
-    hotspot[image<5] = 0
-    image[image<5] = 0
-    return image, hotspot
+    pos_image = np.floor(hotspot * image)
+    pos_image = pos_image.astype(int)
+    neg_image = image - pos_image
 
-def convert_to_dataset(image, total_size):
+    if convert:
+        pos_dataset = convert_to_dataset(pos_image, total_size, value=1)
+        neg_dataset = convert_to_dataset(neg_image, total_size, value=0)
+        total_dataset = np.concatenate([pos_dataset, neg_dataset])
+        res = dict(mask=hotspot, pos_image=pos_image, neg_image=neg_image,
+                pos_dataset=pos_dataset, neg_dataset=neg_dataset,
+                total_dataset=total_dataset)
+        if save:
+            np.save(f'split_dataset_{fwhm}_{center}', res)
+            print(f'Saved to split_dataset_{fwhm}_({center[0]},{center[1]}).npy')
+        return res
+    else:
+        return dict(mask=hotspot, pos_image=pos_image, neg_image=neg_image)
 
-    dataset = np.zeros(image.sum(),
-                       dtype=[('x', np.int16), ('y', np.int16)])
+
+def convert_to_dataset(image, total_size, value=None):
+    if value is not None:
+        dataset = np.zeros(image.sum(),
+                           dtype=[('x', np.int16), ('y', np.int16),
+                                  ('pos', np.int8)])
+    else:
+        dataset = np.zeros(image.sum(),
+                           dtype=[('x', np.int16), ('y', np.int16)])
     z = 0
     for i in tqdm(range(total_size), total=total_size):
         for j in range(total_size):
             for _ in range(int(image[i, j])):
-                dataset[z] = (i, j)
+                if value is not None:
+                    dataset[z] = (i, j, value)
+                else:
+                    dataset[z] = (i, j)
                 z += 1
 
     return dataset
@@ -326,7 +423,7 @@ def convert_to_dataset(image, total_size):
 
 def make_step(samples, eps, threshold, partial,
               prefix_len, dropout_rate, tree, tree_prefix_list,
-              noiser, quantize, total_size):
+              noiser, quantize, total_size, positivity):
 
     samples_len = len(samples)
     round_vector = np.zeros([partial, prefix_len])
@@ -335,7 +432,7 @@ def make_step(samples, eps, threshold, partial,
         if dropout_rate and random.random() <= dropout_rate:
             continue
         round_vector[j % partial] = report_coordinate_to_vector(
-            sample, tree, tree_prefix_list)
+            sample, tree, tree_prefix_list, positivity)
         if j % partial == 0 or j == samples_len - 1:
             round_vector = noiser.apply_noise(round_vector)
             if quantize is not None:
@@ -354,9 +451,10 @@ def make_step(samples, eps, threshold, partial,
             round_vector = np.zeros([partial, prefix_len])
     del round_vector
     rebuilder = np.copy(sum_vector)
-    test_image = rebuild_from_vector(
-        rebuilder, tree, image_size=total_size, threshold=threshold)
-    grid_contour = rebuild_from_vector(
+    test_image, pos_image, neg_image = rebuild_from_vector(
+        rebuilder, tree, image_size=total_size, threshold=threshold,
+        positivity=positivity)
+    grid_contour, _, _ = rebuild_from_vector(
         sum_vector,
         tree,
         image_size=total_size,
@@ -369,6 +467,8 @@ def make_step(samples, eps, threshold, partial,
         tree_prefix_list=tree_prefix_list,
         threshold=threshold,
         grid_contour=grid_contour,
+        pos_image=pos_image,
+        neg_image=neg_image,
         eps=eps)
 
     return result, grid_contour

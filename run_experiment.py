@@ -35,6 +35,8 @@ import plotting
 from matplotlib import pyplot as plt
 import torch
 
+from config import Config
+
 TOPK = 1000
 TOTAL_SIZE = 1024
 
@@ -71,6 +73,10 @@ def get_data(path, crop_tuple=(512, 100, 1536, 1124),
     return true_image, dataset
 
 
+def get_split_data(path):
+    dataset = np.load(path)
+
+
 def print_output(text, flag):
     """Simple flag to suppress output."""
 
@@ -97,7 +103,8 @@ def run_experiment(true_image,
                    output_flag=True,
                    quantize=None,
                    noise_class=mechanisms.GeometricNoise,
-                   save_gif=False) -> List[geo_utils.AlgResult]:
+                   save_gif=False,
+                   positivity=False) -> List[geo_utils.AlgResult]:
     """The main method to run an experiment using TrieHH.
 
     Args:
@@ -127,12 +134,34 @@ def run_experiment(true_image,
     Returns:
         A list of per level geo_utls.AlgResult objects.
     """
+    config = Config(dataset=dataset,
+                    image=true_image,
+                    level_sample_size=level_sample_size,
+                    secagg_round_size=secagg_round_size,
+                    threshold=threshold,
+                    collapse_threshold=collapse_threshold,
+                    eps_func=eps_func,
+                    total_epsilon_budget=total_epsilon_budget,
+                    top_k=top_k,
+                    partial=partial,
+                    max_levels=max_levels,
+                    threshold_func=threshold_func,
+                    collapse_func=collapse_func,
+                    total_size=total_size,
+                    min_dp_size=min_dp_size,
+                    dropout_rate=dropout_rate,
+                    output_flag=output_flag,
+                    quantize=quantize,
+                    noise_class=noise_class,
+                    save_gif=save_gif,
+                    positivity=positivity)
 
-    tree, tree_prefix_list = geo_utils.init_tree()
+    tree, tree_prefix_list = geo_utils.init_tree(positivity)
     per_level_results = list()
     per_level_grid = list()
     finished = False
     sum_vector = None
+    print(f'positivity: {positivity}')
 
     spent_budget = 0
     if level_sample_size % secagg_round_size != 0:
@@ -194,9 +223,12 @@ def run_experiment(true_image,
             f'Collapse threshold: {collapse_threshold:.2f}', output_flag)
 
         # to prevent OOM errors we use vectors of size partial.
-        result, grid_contour = geo_utils.make_step(samples, eps, threshold, partial,
-              prefix_len, dropout_rate, tree, tree_prefix_list,
-              noiser, quantize, total_size)
+        result, grid_contour = geo_utils.make_step(samples, eps, threshold,
+                                                   partial,
+                                                   prefix_len, dropout_rate,
+                                                   tree, tree_prefix_list,
+                                                   noiser, quantize, total_size,
+                                                   positivity)
 
         per_level_results.append(result)
         per_level_grid.append(grid_contour)
@@ -211,7 +243,8 @@ def run_experiment(true_image,
             print(f'Level: {i}. MSE without sampling error: {metric.mse:.2e}')
 
         tree, tree_prefix_list, finished = geo_utils.split_regions(
-            result.tree_prefix_list, result.sum_vector, threshold, collapse_threshold)
+            result.tree_prefix_list, result.sum_vector, threshold,
+            collapse_threshold, positivity=positivity)
     if output_flag:
         print(f'Total epsilon-users: {spent_budget:.2f} with ' + \
               f'{spent_budget / level_sample_size:.2f} eps per person. ')
