@@ -23,7 +23,7 @@ on some level or a region on the lowest level.
 
 import dataclasses
 import random
-from typing import List
+from typing import List, Any
 from tqdm.notebook import tqdm
 
 import numpy as np
@@ -67,6 +67,8 @@ class AlgResult:
     eps: float
     pos_image: np.ndarray = None
     neg_image: np.ndarray = None
+    metric: Any = None
+    sampled_metric: Any = None
 
 
 def coordinates_to_binary_path(xy_tuple, depth=10):
@@ -273,12 +275,12 @@ def split_regions(tree_prefix_list,
             pos_prefix = tree_prefix_list[i+1]
 
             # check whether the tree has reached the bottom
-            if len(pos_prefix.split('/')) < image_bit_level:
+            if len(pos_prefix.split('/')) >= image_bit_level:
                 continue
 
-            total = pos_count + neg_count
-            p = pos_count / total
-            confidence = np.sqrt((1-p)*p/total)
+            # total = pos_count + neg_count
+            # p = pos_count / total
+            # confidence = np.sqrt((1-p)*p/total)
             # error bound propagation.
             # confidence +/- noise
             # pos_count/total +/- (confidence+conf_noise) => 95% interval for 95% noise interval.
@@ -298,16 +300,16 @@ def split_regions(tree_prefix_list,
                         new_tree_prefix_list.append(new_prefix)
             else:
                 unchanged += 1
-                new_tree[f'{pos_prefix}'] = len(new_tree_prefix_list)
                 new_tree[f'{neg_prefix}'] = len(new_tree_prefix_list)
-                new_tree_prefix_list.append(f'{pos_prefix}')
                 new_tree_prefix_list.append(f'{neg_prefix}')
+                new_tree[f'{pos_prefix}'] = len(new_tree_prefix_list)
+                new_tree_prefix_list.append(f'{pos_prefix}')
     else:
         for i, count in enumerate(vector_counts):
             prefix = tree_prefix_list[i]
 
             # check whether the tree has reached the bottom
-            if len(prefix.split('/')) < image_bit_level:
+            if len(prefix.split('/')) >= image_bit_level:
                 continue
 
             if count > threshold:
@@ -419,6 +421,33 @@ def convert_to_dataset(image, total_size, value=None):
                 z += 1
 
     return dataset
+
+
+def compute_conf_intervals(sum_vector: np.ndarray, level=95):
+    conf_intervals = dict()
+    conf_interval_weighted = dict()
+    if level==95:
+        z= 1.96
+    elif level == 99:
+        z = 2.576
+    elif level ==90:
+        z = 1.645
+    elif level == 98:
+        z = 2.326
+    else:
+        raise ValueError(f'Incorrect confidence level {level}.')
+
+    for i in range(0, sum_vector.shape[0], 2):
+        neg_count = sum_vector[i]
+        pos_count = sum_vector[i+1]
+        total = neg_count + pos_count
+        p = pos_count / total
+        if pos_count > 5 and neg_count > 5:
+            conf_interval = z * np.sqrt( (1-p) * p / total)
+            conf_intervals[i] = conf_interval
+            conf_interval_weighted[i] = conf_interval * total
+
+    return conf_intervals, conf_interval_weighted
 
 
 def make_step(samples, eps, threshold, partial,

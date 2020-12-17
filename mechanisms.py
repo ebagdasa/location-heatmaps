@@ -195,7 +195,7 @@ def get_eps_var(two_sigma, sens=1):
     return -sens * np.log(maybe_r)
 
 
-def std_geom(eps, sens):
+def std_geom(eps, sens=1):
     """Utility function to determine standard deviation from geometric noise.
 
     Args:

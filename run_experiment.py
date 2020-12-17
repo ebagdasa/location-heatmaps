@@ -219,8 +219,7 @@ def run_experiment(true_image,
         if collapse_func:
             collapse_threshold = collapse_func(threshold)
         print_output(
-            f'Level: {i}. Eps: {eps}. Threshold: {threshold:.2f}. ' +
-            f'Collapse threshold: {collapse_threshold:.2f}', output_flag)
+            f'Level: {i}. Eps: {eps}. Threshold: {threshold:.2f}. ', output_flag)
 
         # to prevent OOM errors we use vectors of size partial.
         result, grid_contour = geo_utils.make_step(samples, eps, threshold,
@@ -234,17 +233,29 @@ def run_experiment(true_image,
         per_level_grid.append(grid_contour)
 
         # compare to true image without sampling error
-        if output_flag:
-            metric = metrics.get_metrics(
-                result.image,
-                true_image=image_sampled,
-                top_k=top_k,
-                total_size=total_size)
-            print(f'Level: {i}. MSE without sampling error: {metric.mse:.2e}')
+        if positivity:
+            im = result.pos_image
+        else:
+            im = result.image
+
+        metric = metrics.get_metrics(
+            im,
+            true_image=image_sampled,
+            top_k=top_k,
+            total_size=total_size)
+        result.sampled_metric = metric
+        metric = metrics.get_metrics(
+            im,
+            true_image=true_image,
+            top_k=top_k,
+            total_size=total_size)
+        result.metric = metric
+        print_output(f'Level: {i}. MSE without sampling error: {metric.mse:.2e}', output_flag)
 
         tree, tree_prefix_list, finished = geo_utils.split_regions(
-            result.tree_prefix_list, result.sum_vector, threshold,
-            collapse_threshold, positivity=positivity)
+            tree_prefix_list=result.tree_prefix_list, vector_counts=result.sum_vector,
+            threshold=threshold, image_bit_level=10,
+            collapse_threshold=collapse_threshold, positivity=positivity)
     if output_flag:
         print(f'Total epsilon-users: {spent_budget:.2f} with ' + \
               f'{spent_budget / level_sample_size:.2f} eps per person. ')
@@ -258,17 +269,12 @@ def run_experiment(true_image,
         for i in range(len(per_level_results)):
             axis = ax[i] if len(per_level_results) > 1 else ax
             result = per_level_results[i]
-            metric = metrics.get_metrics(
-                test_image=result.image,
-                true_image=true_image,
-                top_k=top_k,
-                total_size=total_size)
             plotting.plot_it(
                 ax=axis,
-                test_image=result.image,
+                test_image=result.pos_image if positivity else result.image,
                 eps=result.eps,
                 total_regions=len(result.tree_prefix_list),
-                metric=metric)
+                metric=result.metric)
             ax_contour[i].axes.xaxis.set_visible(False)
             ax_contour[i].axes.yaxis.set_visible(False)
             ax_contour[i].imshow(per_level_grid[i])
