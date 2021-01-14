@@ -267,7 +267,6 @@ def split_regions(tree_prefix_list,
     unchanged = 0
     new_tree_prefix_list = list()
     new_tree = pygtrie.StringTrie()
-    print(positivity)
     if positivity:
         for i in range(0, len(tree_prefix_list), 2):
             if expand_all:

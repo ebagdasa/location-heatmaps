@@ -163,7 +163,7 @@ def run_experiment(true_image,
     per_level_grid = list()
     finished = False
     sum_vector = None
-    print(f'positivity: {positivity}')
+    print_output(f'positivity: {positivity}', output_flag)
 
     spent_budget = 0
     remaining_budget = total_epsilon_budget
