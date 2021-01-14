@@ -27,7 +27,7 @@ counts = list()
 
 for tot_eps in tqdm([0.01, 0.1, 1, 10], leave=True):
     results_eps = defaultdict(list)
-    for i, level_sample_size in tqdm(enumerate([500000, 800000, 1000000]), leave=True):
+    for i, level_sample_size in tqdm(enumerate([500000, 800000, 1000000, 2000000]), leave=True):
         print(f'Level sample size: {level_sample_size}. Epsilon: {tot_eps}.')
         for j in tqdm(range(5), leave=False):
             c = np.sqrt(sec_agg / level_sample_size)
@@ -43,6 +43,10 @@ for tot_eps in tqdm([0.01, 0.1, 1, 10], leave=True):
                 threshold_func = lambda i, prefix_len, eps, remaining: 5
                 total_epsilon_budget = None
 
+            if tot_eps > 0.1:
+                start_with_level = 4
+            else:
+                start_with_level = 0
 
             res = run_experiment.run_experiment(true_image,
                            dataset,
@@ -63,7 +67,7 @@ for tot_eps in tqdm([0.01, 0.1, 1, 10], leave=True):
                            quantize=None,
                            save_gif=False,
                            positivity=False,
-                           start_with_level=0)
+                           start_with_level=start_with_level)
             results_eps[level_sample_size].append(res[-1])
 
     results[tot_eps] = results_eps
