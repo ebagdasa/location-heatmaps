@@ -92,7 +92,6 @@ class GeometricNoise(NoiseAddition):
         polya1 = tf.random.poisson(shape=[1], lam=gamma1, dtype=tf.dtypes.int32)
         polya2 = tf.random.poisson(shape=[1], lam=gamma2, dtype=tf.dtypes.int32)
         client_noise = tf.reshape(tf.subtract(polya1, polya2), input_shape)
-
         return client_noise.numpy()
 
 
@@ -179,7 +178,7 @@ class RapporNoise(NoiseAddition):
         return sol.x[0]
 
 
-def get_eps_var(two_sigma, sens=1):
+def get_eps_from_two_std(two_sigma, sens=1):
     """Utility function to retrieve geometric noise eps from provided error.
 
     Args:
@@ -195,7 +194,7 @@ def get_eps_var(two_sigma, sens=1):
     return -sens * np.log(maybe_r)
 
 
-def std_geom(eps, sens=1):
+def get_std_from_eps(eps, sens=1):
     """Utility function to determine standard deviation from geometric noise.
 
     Args:

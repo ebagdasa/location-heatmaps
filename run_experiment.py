@@ -176,9 +176,9 @@ def run_experiment(true_image,
     if collapse_threshold and collapse_func:
         raise ValueError(
             'Specify either `collapse_threshold` or `collapse_func`.')
-
+    samples = np.random.choice(dataset, level_sample_size, replace=False)
     for i in range(max_levels):
-        samples = np.random.choice(dataset, level_sample_size, replace=False)
+
         samples_len = len(samples)
         prefix_len = len(tree_prefix_list)
         # create an image from the sampled data.
@@ -256,6 +256,8 @@ def run_experiment(true_image,
             tree_prefix_list=result.tree_prefix_list, vector_counts=result.sum_vector,
             threshold=threshold, image_bit_level=10,
             collapse_threshold=collapse_threshold, positivity=positivity)
+        if finished:
+            break
     if output_flag:
         print(f'Total epsilon-users: {spent_budget:.2f} with ' + \
               f'{spent_budget / level_sample_size:.2f} eps per person. ')

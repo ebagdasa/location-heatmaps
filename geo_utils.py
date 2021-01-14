@@ -299,11 +299,26 @@ def split_regions(tree_prefix_list,
                         new_tree[new_prefix] = len(new_tree_prefix_list)
                         new_tree_prefix_list.append(new_prefix)
             else:
-                unchanged += 1
-                new_tree[f'{neg_prefix}'] = len(new_tree_prefix_list)
-                new_tree_prefix_list.append(f'{neg_prefix}')
-                new_tree[f'{pos_prefix}'] = len(new_tree_prefix_list)
-                new_tree_prefix_list.append(f'{pos_prefix}')
+                if collapse_threshold is not None and \
+                        (pos_count < collapse_threshold or neg_count < collapse_threshold) and \
+                        len(pos_prefix) > 3 and len(neg_prefix) > 3:
+
+                    old_prefix = neg_prefix[:-4]
+                    collapsed += 1
+                    if not new_tree.has_key(old_prefix):
+                        created += 1
+                        new_tree[old_prefix] = len(new_tree_prefix_list)
+                        new_tree_prefix_list.append(old_prefix)
+
+                        old_prefix = pos_prefix[:-4]
+                        new_tree[old_prefix] = len(new_tree_prefix_list)
+                        new_tree_prefix_list.append(old_prefix)
+                else:
+                    unchanged += 1
+                    new_tree[f'{neg_prefix}'] = len(new_tree_prefix_list)
+                    new_tree_prefix_list.append(f'{neg_prefix}')
+                    new_tree[f'{pos_prefix}'] = len(new_tree_prefix_list)
+                    new_tree_prefix_list.append(f'{pos_prefix}')
     else:
         for i, count in enumerate(vector_counts):
             prefix = tree_prefix_list[i]
@@ -340,6 +355,7 @@ def split_regions(tree_prefix_list,
               f'new expanded: {fresh_expand},' + \
               f'unchanged: {unchanged}, total: {len(new_tree_prefix_list)}')
     if not fresh_expand:  # len(new_tree_prefix_list) <= len(tree_prefix_list):
+        print('Finished expanding, no new results.')
         finished = True
     return new_tree, new_tree_prefix_list, finished
 
@@ -367,12 +383,16 @@ def quantize_vector(vector, left_bound, right_bound):
 
 
 def makeGaussian(image, total_size, fwhm=3, center=None,
-                 convert=False, save=False):
+                 convert=False, save=False, load=False):
     """ Make a square gaussian kernel.
     size is the length of a side of the square
     fwhm is full-width-half-maximum, which
     can be thought of as an effective radius.
     """
+    import torch
+
+    if load:
+        return torch.load(f'split_dataset_{fwhm}_{center[0]}_{center[1]}.pt')
     size = image.shape[0]
     x = np.arange(0, size, 1, float)
     y = x[:, np.newaxis]
@@ -395,8 +415,8 @@ def makeGaussian(image, total_size, fwhm=3, center=None,
                 pos_dataset=pos_dataset, neg_dataset=neg_dataset,
                 total_dataset=total_dataset)
         if save:
-            np.save(f'split_dataset_{fwhm}_{center}', res)
-            print(f'Saved to split_dataset_{fwhm}_({center[0]},{center[1]}).npy')
+            torch.save(res, f'split_dataset_{fwhm}_{center[0]}_{center[1]}.pt')
+            print(f'Saved to split_dataset_{fwhm}_{center[0]}_{center[1]}.pt')
         return res
     else:
         return dict(mask=hotspot, pos_image=pos_image, neg_image=neg_image)
@@ -441,11 +461,11 @@ def compute_conf_intervals(sum_vector: np.ndarray, level=95):
         neg_count = sum_vector[i]
         pos_count = sum_vector[i+1]
         total = neg_count + pos_count
-        p = pos_count / total
         if pos_count > 5 and neg_count > 5:
+            p = pos_count / total
             conf_interval = z * np.sqrt( (1-p) * p / total)
             conf_intervals[i] = conf_interval
-            conf_interval_weighted[i] = conf_interval * total
+            conf_interval_weighted[i] = conf_interval * total/sum_vector.sum()
 
     return conf_intervals, conf_interval_weighted
 
@@ -480,15 +500,21 @@ def make_step(samples, eps, threshold, partial,
             round_vector = np.zeros([partial, prefix_len])
     del round_vector
     rebuilder = np.copy(sum_vector)
+    if eps:
+        threshold_rebuild = threshold
+    else:
+        threshold_rebuild = 0.0
+
     test_image, pos_image, neg_image = rebuild_from_vector(
-        rebuilder, tree, image_size=total_size, threshold=threshold,
+        rebuilder, tree, image_size=total_size, threshold=threshold_rebuild,
         positivity=positivity)
+
     grid_contour, _, _ = rebuild_from_vector(
         sum_vector,
         tree,
         image_size=total_size,
         contour=True,
-        threshold=threshold)
+        threshold=threshold_rebuild)
     result = AlgResult(
         image=test_image,
         sum_vector=sum_vector,
