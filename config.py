@@ -28,3 +28,4 @@ class Config:
     noise_class: Any = None
     save_gif: bool = False
     positivity: bool = False
+    start_with_level: int = 0

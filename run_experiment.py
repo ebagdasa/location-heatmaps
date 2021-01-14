@@ -26,7 +26,7 @@ from typing import List
 
 import os
 import numpy as np
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 from PIL import Image
 import geo_utils
 import mechanisms
@@ -104,7 +104,8 @@ def run_experiment(true_image,
                    quantize=None,
                    noise_class=mechanisms.GeometricNoise,
                    save_gif=False,
-                   positivity=False) -> List[geo_utils.AlgResult]:
+                   positivity=False,
+                   start_with_level=0) -> List[geo_utils.AlgResult]:
     """The main method to run an experiment using TrieHH.
 
     Args:
@@ -154,7 +155,8 @@ def run_experiment(true_image,
                     quantize=quantize,
                     noise_class=noise_class,
                     save_gif=save_gif,
-                    positivity=positivity)
+                    positivity=positivity,
+                    start_with_level=start_with_level)
 
     tree, tree_prefix_list = geo_utils.init_tree(positivity)
     per_level_results = list()
@@ -164,6 +166,7 @@ def run_experiment(true_image,
     print(f'positivity: {positivity}')
 
     spent_budget = 0
+    remaining_budget = total_epsilon_budget
     if level_sample_size % secagg_round_size != 0:
         raise ValueError('Sample size cannot be split into SecAgg')
     else:
@@ -215,13 +218,24 @@ def run_experiment(true_image,
         if threshold_func:
             threshold = threshold_func(
                 i, prefix_len, eps,
-                eps + (total_epsilon_budget - spent_budget) / samples_len)
+                (total_epsilon_budget-spent_budget) / samples_len)
         if collapse_func:
             collapse_threshold = collapse_func(threshold)
         print_output(
             f'Level: {i}. Eps: {eps}. Threshold: {threshold:.2f}. ', output_flag)
 
         # to prevent OOM errors we use vectors of size partial.
+        if start_with_level > i:
+            tree, tree_prefix_list, finished = geo_utils.split_regions(
+                tree_prefix_list=tree_prefix_list,
+                vector_counts=None,
+                threshold=threshold, image_bit_level=10,
+                collapse_threshold=collapse_threshold, positivity=positivity,
+            expand_all=True)
+            print_output(f"Expanding all at the level: {i}.", output_flag)
+            continue
+
+
         result, grid_contour = geo_utils.make_step(samples, eps, threshold,
                                                    partial,
                                                    prefix_len, dropout_rate,
@@ -270,6 +284,7 @@ def run_experiment(true_image,
 
         for i in range(len(per_level_results)):
             axis = ax[i] if len(per_level_results) > 1 else ax
+            axis_contour = ax_contour[i] if len(per_level_results) > 1 else ax_contour
             result = per_level_results[i]
             plotting.plot_it(
                 ax=axis,
@@ -277,9 +292,10 @@ def run_experiment(true_image,
                 eps=result.eps,
                 total_regions=len(result.tree_prefix_list),
                 metric=result.metric)
-            ax_contour[i].axes.xaxis.set_visible(False)
-            ax_contour[i].axes.yaxis.set_visible(False)
-            ax_contour[i].imshow(per_level_grid[i])
+
+            axis_contour.axes.xaxis.set_visible(False)
+            axis_contour.axes.yaxis.set_visible(False)
+            axis_contour.imshow(per_level_grid[i])
         if save_gif:
             images = [result.image for result in per_level_results]
             plotting.save_gif(images, path='/gif_image/')

@@ -24,7 +24,7 @@ on some level or a region on the lowest level.
 import dataclasses
 import random
 from typing import List, Any
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 
 import numpy as np
 import pygtrie
@@ -244,7 +244,8 @@ def split_regions(tree_prefix_list,
                   threshold,
                   image_bit_level,
                   collapse_threshold=None,
-                  positivity=False):
+                  positivity=False,
+                  expand_all=False):
     """Modify the tree by splitting and collapsing the nodes.
 
     This implementation collapses and splits nodes of the tree according to
@@ -268,9 +269,13 @@ def split_regions(tree_prefix_list,
     new_tree = pygtrie.StringTrie()
     print(positivity)
     if positivity:
-        for i in range(0, len(vector_counts), 2):
-            neg_count = vector_counts[i]
-            pos_count = vector_counts[i+1]
+        for i in range(0, len(tree_prefix_list), 2):
+            if expand_all:
+                neg_count = threshold + 1
+                pos_count = threshold + 1
+            else:
+                neg_count = vector_counts[i]
+                pos_count = vector_counts[i+1]
             neg_prefix = tree_prefix_list[i]
             pos_prefix = tree_prefix_list[i+1]
 
@@ -320,7 +325,11 @@ def split_regions(tree_prefix_list,
                     new_tree[f'{pos_prefix}'] = len(new_tree_prefix_list)
                     new_tree_prefix_list.append(f'{pos_prefix}')
     else:
-        for i, count in enumerate(vector_counts):
+        for i in range(len(tree_prefix_list)):
+            if expand_all:
+                count = threshold + 1
+            else:
+                count = vector_counts[i]
             prefix = tree_prefix_list[i]
 
             # check whether the tree has reached the bottom
