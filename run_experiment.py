@@ -105,7 +105,8 @@ def run_experiment(true_image,
                    noise_class=mechanisms.GeometricNoise,
                    save_gif=False,
                    positivity=False,
-                   start_with_level=0) -> List[geo_utils.AlgResult]:
+                   start_with_level=0,
+                   ignore_start_eps=False) -> List[geo_utils.AlgResult]:
     """The main method to run an experiment using TrieHH.
 
     Args:
@@ -213,7 +214,10 @@ def run_experiment(true_image,
                     eps = remaining_budget / samples_len
 
             noiser = noise_class(dp_round_size, 1, eps)
-            spent_budget += eps * samples_len
+            if ignore_start_eps and start_with_level<=i:
+                print_output('Ignoring eps spent', flag=output_flag)
+            else:
+                spent_budget += eps * samples_len
 
         if threshold_func:
             threshold = threshold_func(

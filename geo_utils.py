@@ -468,12 +468,13 @@ def compute_conf_intervals(sum_vector: np.ndarray, level=95):
     for i in range(0, sum_vector.shape[0], 2):
         neg_count = sum_vector[i]
         pos_count = sum_vector[i+1]
-        total = neg_count + pos_count
+        total_clients_on_map = sum_vector.sum()
+        total_region = neg_count + pos_count
         if pos_count > 5 and neg_count > 5:
-            p = pos_count / total
-            conf_interval = z * np.sqrt( (1-p) * p / total)
+            p = pos_count / total_region
+            conf_interval = z * np.sqrt( (1-p) * p / total_region)
             conf_intervals[i] = conf_interval
-            conf_interval_weighted[i] = conf_interval * total/sum_vector.sum()
+            conf_interval_weighted[i] = conf_interval * total_region/total_clients_on_map
 
     return conf_intervals, conf_interval_weighted
 
