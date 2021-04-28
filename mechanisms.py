@@ -123,6 +123,9 @@ class RapporNoise(NoiseAddition):
     def eps_local(self):
         return np.log(2 * self.num_clients / self.lam - 1)
 
+    def get_noise_tensor(self, input_shape):
+        return
+
     def apply_noise(self, input_tensor):
         """Sample bool vector for zeros using RAPPOR.
 

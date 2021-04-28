@@ -106,7 +106,8 @@ def run_experiment(true_image,
                    save_gif=False,
                    positivity=False,
                    start_with_level=0,
-                   ignore_start_eps=False) -> List[geo_utils.AlgResult]:
+                   ignore_start_eps=False,
+                   last_result_ci=None) -> List[geo_utils.AlgResult]:
     """The main method to run an experiment using TrieHH.
 
     Args:
@@ -269,11 +270,15 @@ def run_experiment(true_image,
             total_size=total_size)
         result.metric = metric
         print_output(f'Level: {i}. MSE without sampling error: {metric.mse:.2e}', output_flag)
-
+        if i==0 or not last_result_ci:
+            last_result = None
+        else:
+            last_result = per_level_results[i - 1]
         tree, tree_prefix_list, finished = geo_utils.split_regions(
             tree_prefix_list=result.tree_prefix_list, vector_counts=result.sum_vector,
             threshold=threshold, image_bit_level=10,
-            collapse_threshold=collapse_threshold, positivity=positivity)
+            collapse_threshold=collapse_threshold, positivity=positivity,
+            last_result=last_result)
         if finished:
             break
     if output_flag:

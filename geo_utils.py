@@ -245,7 +245,8 @@ def split_regions(tree_prefix_list,
                   image_bit_level,
                   collapse_threshold=None,
                   positivity=False,
-                  expand_all=False):
+                  expand_all=False,
+                  last_result: AlgResult=None):
     """Modify the tree by splitting and collapsing the nodes.
 
     This implementation collapses and splits nodes of the tree according to
@@ -265,6 +266,7 @@ def split_regions(tree_prefix_list,
     created = 0
     fresh_expand = 0
     unchanged = 0
+    intervals = list()
     new_tree_prefix_list = list()
     new_tree = pygtrie.StringTrie()
     if positivity:
@@ -334,8 +336,25 @@ def split_regions(tree_prefix_list,
             # check whether the tree has reached the bottom
             if len(prefix.split('/')) >= image_bit_level:
                 continue
-
-            if count > threshold:
+            if last_result is not None:
+                (last_prefix, last_prefix_pos) = last_result.tree.longest_prefix(prefix)
+                if last_prefix is None:
+                    cond = False
+                else:
+                    last_count = last_result.sum_vector[last_prefix_pos]
+                    p = (last_count - count)/last_count
+                    if p<=0 or count<5  or last_count<5:
+                        cond = False
+                        # print(last_prefix, prefix, last_prefix_pos, last_count,
+                        #       count)
+                    else:
+                        conf_int = 1.96 * np.sqrt((p*(1-p)/last_count)) * last_count
+                        cond = conf_int < threshold
+                        intervals.append(conf_int)
+                        # print(last_prefix, prefix, last_prefix_pos, last_count, count, conf_int, cond)
+            else:
+                cond = count > threshold
+            if cond:
                 for child in DEFAULT_CHILDREN:
                     new_prefix = f'{prefix}/{child}'
                     if not new_tree.has_key(new_prefix):
@@ -358,11 +377,12 @@ def split_regions(tree_prefix_list,
                     new_tree[f'{prefix}'] = len(new_tree_prefix_list)
                     new_tree_prefix_list.append(f'{prefix}')
     finished = False
-    if collapse_threshold:
-        print(f'Collapsed: {collapsed}, created when collapsing: {created},' + \
-              f'new expanded: {fresh_expand},' + \
-              f'unchanged: {unchanged}, total: {len(new_tree_prefix_list)}')
-    if not fresh_expand:  # len(new_tree_prefix_list) <= len(tree_prefix_list):
+    print(f'Conf int {np.mean(intervals) if len(intervals) else 0}.')
+    # if collapse_threshold:
+    print(f'Collapsed: {collapsed}, created when collapsing: {created},' + \
+          f'new expanded: {fresh_expand},' + \
+          f'unchanged: {unchanged}, total: {len(new_tree_prefix_list)}')
+    if fresh_expand == 0:  # len(new_tree_prefix_list) <= len(tree_prefix_list):
         print('Finished expanding, no new results.')
         finished = True
     return new_tree, new_tree_prefix_list, finished
