@@ -64,8 +64,10 @@ def plot_it(ax, test_image, eps, total_regions, metric: metrics.Metrics):
                  f'L1: {metric.l1_distance:.2e}. L2: {metric.l2_distance:.2e}.' +
                  '\n' + f'HS: {metric.hotspots_count}. f1: {metric.f1:.3f}' +
                  '\n' + f'WS: {metric.wasserstein:.2e}. ' +
+                 '\n' + f'MAPE: {metric.mape:.3f}. SMAPE: {metric.smape:.3f}' +
+                 '\n' + f'MAAPE: {metric.maape:.3f}. ' +
                  f'Mutual: {metric.mutual_info:.3f}.' + '\n' +
-                 f'MSE: {metric.mse:.2e}')
+                 f'MSE: {metric.mse:.2e}', fontsize=30)
     ax.imshow(test_image, interpolation='bilinear')
     return
 
@@ -136,11 +138,13 @@ def plot_3d_single(fig, pos, test_image):
     vmax = np.max(test_image)
     ax = fig.add_subplot(pos, projection='3d')
     # Make data.
-    x_arr = np.arange(0, 1024, 1)
-    y_arr = np.arange(0, 1024, 1)
+    x_arr = 1024 - np.arange(0, 1024, 1)
+    y_arr = 1024 - np.arange(0, 1024, 1)
     x_arr, y_arr = np.meshgrid(x_arr, y_arr)
 
     z_arr = np.copy(test_image)
+
+    ax.set_axis_off()
 
     surf = ax.plot_surface(
         x_arr,
@@ -156,9 +160,10 @@ def plot_3d_single(fig, pos, test_image):
     ax.zaxis.set_major_formatter(ticker.FormatStrFormatter('%.02f'))
 
     # Add a color bar which maps values to colors.
-    fig.colorbar(surf, shrink=0.5, aspect=5)
+    # fig.colorbar(surf, shrink=0.5, aspect=5)
     ax.invert_yaxis()
     ax.view_init(70)
+
 
 
 def plot_all_3d(per_level_results: List[geo_utils.AlgResult]):
@@ -174,4 +179,5 @@ def plot_all_3d(per_level_results: List[geo_utils.AlgResult]):
     for i in range(level_count):
         image = per_level_results[i].image
         plot_3d_single(fig, f'1{level_count}{i + 1}', image)
+    plt.savefig('3d.png', dpi=120)
     plt.show()

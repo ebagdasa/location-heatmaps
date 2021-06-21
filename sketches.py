@@ -13,7 +13,7 @@ class CountMinSketch(object):
         if len(hash_functions) != d:
             raise ValueError("The number of hash functions must match match the depth. (%s, %s)" % (d, len(hash_functions)))
         if M is None:
-            self.M = np.zeros([d, w], dtype=np.int32)
+            self.M = np.zeros([d, w], dtype=np.float64)
         else:
             self.M = M
 

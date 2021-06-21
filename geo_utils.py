@@ -28,6 +28,14 @@ from tqdm import tqdm
 
 import numpy as np
 import pygtrie
+from sketches import CountMinSketch, hash_function
+
+
+depth = 20
+width = 2000
+hash_functions = [hash_function(i) for i in range(depth)]
+sum_sketch = CountMinSketch(depth, width, hash_functions)
+# count_min = False
 
 DEFAULT_CHILDREN = ['00', '01', '10', '11']
 
@@ -124,13 +132,19 @@ def binary_path_to_coordinates(path):
     return x, y, len(splitted_path), pos
 
 
-def report_coordinate_to_vector(xy, tree, tree_prefix_list, positivity):
+def report_coordinate_to_vector(xy, tree, tree_prefix_list, count_min):
     """Converts a coordinate tuple into a one-hot vector using tree."""
-
-    vector = np.zeros([len(tree_prefix_list)])
     path = coordinates_to_binary_path(xy)
-    (_, value) = tree.longest_prefix(path)
-    vector[value] += 1
+    (sub_path, value) = tree.longest_prefix(path)
+    if count_min:
+        sketch = CountMinSketch(depth, width, hash_functions)
+        sketch.add(sub_path)
+        # print(sub_path, sketch.query(sub_path))
+        vector = sketch.get_matrix()
+    else:
+        vector = np.zeros([len(tree_prefix_list)])
+
+        vector[value] += 1
     return vector
 
 
@@ -183,7 +197,7 @@ def transform_region_to_coordinates(x_coord,
 
 
 def rebuild_from_vector(vector, tree, image_size, contour=False, threshold=0,
-                        positivity=False):
+                        positivity=False, count_min=False):
     """Using coordinate vector and the tree produce a resulting image.
 
     For each value in the vector it finds the corresponding prefix and plots the
@@ -195,6 +209,8 @@ def rebuild_from_vector(vector, tree, image_size, contour=False, threshold=0,
       image_size: desired final resolution of the image.
       contour: release only the contours of the grid (for debugging)
       threshold: reduces noise by setting values below threshold to 0.
+      positivity: produce two images with positive and negative cases.
+      count_min: use count min sketch.
 
     Returns:
       image of the size `image_size x image_size`
@@ -206,14 +222,18 @@ def rebuild_from_vector(vector, tree, image_size, contour=False, threshold=0,
         pos_image = np.zeros([image_size, image_size])
         neg_image = np.zeros([image_size, image_size])
     for path in sorted(tree):
-        value = vector[tree[path]]
+        if count_min:
+            value = sum_sketch.query(path)
+        else:
+            value = vector[tree[path]]
         (x, y, prefix_len, pos) = binary_path_to_coordinates(path)
         (x_bot, x_top, y_bot,
          y_top) = transform_region_to_coordinates(x, y, prefix_len,
                                                   image_bit_level)
+
         if value < threshold:
             value = 0
-        count = value / 2 ** (2 * (image_bit_level - prefix_len))
+        count = value / 2 ** (1 * (image_bit_level - prefix_len))
 
         # Build a grid image without filling the regions.
         if contour:
@@ -246,7 +266,8 @@ def split_regions(tree_prefix_list,
                   collapse_threshold=None,
                   positivity=False,
                   expand_all=False,
-                  last_result: AlgResult=None):
+                  last_result: AlgResult=None,
+                  count_min=False):
     """Modify the tree by splitting and collapsing the nodes.
 
     This implementation collapses and splits nodes of the tree according to
@@ -330,7 +351,10 @@ def split_regions(tree_prefix_list,
             if expand_all:
                 count = threshold + 1
             else:
-                count = vector_counts[i]
+                if count_min:
+                    count = sum_sketch.query(tree_prefix_list[i])
+                else:
+                    count = vector_counts[i]
             prefix = tree_prefix_list[i]
 
             # check whether the tree has reached the bottom
@@ -354,6 +378,7 @@ def split_regions(tree_prefix_list,
                         # print(last_prefix, prefix, last_prefix_pos, last_count, count, conf_int, cond)
             else:
                 cond = count > threshold
+            # print(cond, threshold, count)
             if cond:
                 for child in DEFAULT_CHILDREN:
                     new_prefix = f'{prefix}/{child}'
@@ -377,11 +402,11 @@ def split_regions(tree_prefix_list,
                     new_tree[f'{prefix}'] = len(new_tree_prefix_list)
                     new_tree_prefix_list.append(f'{prefix}')
     finished = False
-    print(f'Conf int {np.mean(intervals) if len(intervals) else 0}.')
+    # print(f'Conf int {np.mean(intervals) if len(intervals) else 0}.')
     # if collapse_threshold:
-    print(f'Collapsed: {collapsed}, created when collapsing: {created},' + \
-          f'new expanded: {fresh_expand},' + \
-          f'unchanged: {unchanged}, total: {len(new_tree_prefix_list)}')
+    # print(f'Collapsed: {collapsed}, created when collapsing: {created},' + \
+    #       f'new expanded: {fresh_expand},' + \
+    #       f'unchanged: {unchanged}, total: {len(new_tree_prefix_list)}')
     if fresh_expand == 0:  # len(new_tree_prefix_list) <= len(tree_prefix_list):
         print('Finished expanding, no new results.')
         finished = True
@@ -501,16 +526,21 @@ def compute_conf_intervals(sum_vector: np.ndarray, level=95):
 
 def make_step(samples, eps, threshold, partial,
               prefix_len, dropout_rate, tree, tree_prefix_list,
-              noiser, quantize, total_size, positivity):
+              noiser, quantize, total_size, positivity, count_min):
 
     samples_len = len(samples)
-    round_vector = np.zeros([partial, prefix_len])
-    sum_vector = np.zeros(prefix_len)
+    if count_min:
+        round_vector = np.zeros([partial, depth, width])
+        sum_sketch.M = np.zeros([depth, width], dtype=np.float64)
+        sum_vector = sum_sketch.get_matrix()
+    else:
+        round_vector = np.zeros([partial, prefix_len])
+        sum_vector = np.zeros(prefix_len)
     for j, sample in enumerate(tqdm(samples, leave=False)):
         if dropout_rate and random.random() <= dropout_rate:
             continue
         round_vector[j % partial] = report_coordinate_to_vector(
-            sample, tree, tree_prefix_list, positivity)
+            sample, tree, tree_prefix_list, count_min)
         if j % partial == 0 or j == samples_len - 1:
             round_vector = noiser.apply_noise(round_vector)
             if quantize is not None:
@@ -526,7 +556,10 @@ def make_step(samples, eps, threshold, partial,
             else:
                 sum_vector += round_vector.sum(axis=0)
 
-            round_vector = np.zeros([partial, prefix_len])
+            if count_min:
+                round_vector = np.zeros([partial, depth, width])
+            else:
+                round_vector = np.zeros([partial, prefix_len])
     del round_vector
     rebuilder = np.copy(sum_vector)
     if eps:
@@ -536,14 +569,14 @@ def make_step(samples, eps, threshold, partial,
 
     test_image, pos_image, neg_image = rebuild_from_vector(
         rebuilder, tree, image_size=total_size, threshold=threshold_rebuild,
-        positivity=positivity)
+        positivity=positivity, count_min=count_min)
 
     grid_contour, _, _ = rebuild_from_vector(
         sum_vector,
         tree,
         image_size=total_size,
         contour=True,
-        threshold=threshold_rebuild)
+        threshold=threshold_rebuild, count_min=count_min)
     result = AlgResult(
         image=test_image,
         sum_vector=sum_vector,

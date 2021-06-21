@@ -25,28 +25,30 @@ tail_coefficient = 1/10
 # [10000, 50000, 100000, 200000, 500000, 800000, 1000000 ,2000000, 5000000, 10000000]
 # 0.5, 1, 2
 counts = list()
+positivity = False
+start_with_level = 0
 
 for tot_eps in tqdm([0.01, 0.1, 1, 10], leave=True):
     results_eps = defaultdict(list)
-    for i, level_sample_size in tqdm(enumerate([500000, 800000, 1000000, 2000000]), leave=True):
+    for i, level_sample_size in tqdm(enumerate([100000, 500000, 800000, 1000000]), leave=True):
         print(f'Level sample size: {level_sample_size}. Epsilon: {tot_eps}.')
         for j in tqdm(range(1), leave=False):
             c = np.sqrt(sec_agg / level_sample_size)
 
             if args.dp:
-                eps_func = lambda x, num_regions: max(20, mechanisms.get_eps_from_two_std(1 / 10 * np.sqrt(c) * level_sample_size / num_regions))
+                eps_func = lambda x, num_regions: max(4, mechanisms.get_eps_from_two_std(1 / 10 * np.sqrt(c) * level_sample_size / num_regions))
 
-                collapse_func = lambda threshold: max(5, 1/4 * threshold)
+                collapse_func = lambda threshold: max(1, 1/4 * threshold)
 
                 threshold_func = lambda i, p, eps, remaining: 2 / np.sqrt(
-                    c) * mechanisms.get_std_from_eps(max(eps, remaining))
+                    c) * mechanisms.get_std_from_eps(eps)
                 total_epsilon_budget = tot_eps * level_sample_size
             else:
                 eps_func = lambda x, y: None
                 threshold_func = lambda i, prefix_len, eps, remaining: 5
                 total_epsilon_budget = None
 
-            start_with_level = 4
+            #
 
             res = run_experiment.run_experiment(split_dataset['pos_image'],
                            split_dataset['pos_dataset'],
@@ -66,8 +68,8 @@ for tot_eps in tqdm([0.01, 0.1, 1, 10], leave=True):
                            output_flag=False,
                            quantize=None,
                            save_gif=False,
-                           positivity=True,
+                           positivity=positivity,
                            start_with_level=start_with_level)
             results_eps[level_sample_size].append(res)
             results[tot_eps][i] = results_eps
-            torch.save(results, f'pos_results_{args.name}.pt')
+            torch.save(results, f'results_pos_{positivity}_{args.name}.pt')

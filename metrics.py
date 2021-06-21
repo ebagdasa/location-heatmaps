@@ -37,13 +37,28 @@ class Metrics:
       f1: f1 score on the discovered hot spots.
       mutual_info: mutual information metric.
     """
-    mse: float
-    l1_distance: float
-    l2_distance: float
-    wasserstein: float
-    hotspots_count: int
-    f1: float
-    mutual_info: float
+    mse: float = 0
+    l1_distance: float = 0
+    l2_distance: float = 0
+    wasserstein: float = 0
+    hotspots_count: int = 0
+    f1: float = 0
+    mutual_info: float = 0
+    mape: float = 0
+    smape: float = 0
+    maape: float = 0
+    nmse: float = 0
+
+#MAPE
+def mape(test_image, no_zeros_norm):
+    return float(np.mean(np.abs(no_zeros_norm-test_image)/no_zeros_norm))
+
+def smape(test_image, no_zeros_norm):
+    return float(2*np.mean(np.abs(no_zeros_norm-test_image)/(no_zeros_norm+test_image)))
+
+def maape(test_image, no_zeros_norm):
+    return float(np.mean(np.arctan(np.abs(no_zeros_norm-test_image)/(no_zeros_norm))))
+
 
 
 def rescale_image(image: np.ndarray, total_size: int):
@@ -134,8 +149,10 @@ def get_metrics(test_image, true_image, top_k, total_size):
     """
 
     # normalize the input images
+
     test_image = normalize(rescale_image(test_image, total_size))
     true_image = normalize(rescale_image(true_image, total_size))
+
 
     top_k_test, top_k_test_arr = largest_indices(test_image, top_k)
     top_k_true, top_k_true_arr = largest_indices(true_image, top_k)
@@ -152,8 +169,22 @@ def get_metrics(test_image, true_image, top_k, total_size):
     mutual = mt.mutual_info_score(true_image.reshape(-1),
                                   test_image.reshape(-1))
 
+    no_zeros_true_image = np.zeros_like(true_image)
+    next_min_element = np.min(true_image[np.nonzero(true_image)])
+    no_zeros_true_image.fill(next_min_element)
+    no_zeros_true_image[np.nonzero(true_image)] = true_image[
+        np.nonzero(true_image)]
+    no_zeros_norm = no_zeros_true_image / no_zeros_true_image.sum()
+
+
+
+
     metrics = Metrics(l1_distance=l1_distance, l2_distance=l2_distance,
                       mse=mse, f1=f1, wasserstein=wasserstein,
-                      hotspots_count=top_k_diff, mutual_info=mutual)
+                      hotspots_count=top_k_diff, mutual_info=mutual,
+                      mape=mape(test_image, no_zeros_norm),
+                      smape=smape(test_image, no_zeros_norm),
+                      maape=maape(test_image, no_zeros_norm)
+                      )
 
     return metrics

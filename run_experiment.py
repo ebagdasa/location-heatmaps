@@ -207,10 +207,10 @@ def run_experiment(true_image,
             # prevent spilling over the budget
             if remaining_budget:
                 # last round, no progress in tree, or cannot run at least two rounds.
-                if i == max_levels or finished \
+                if i == max_levels-1 or finished \
                         or remaining_budget < 2 * eps * samples_len:
                     print_output(
-                        'Last round. Spending remaining epsilon budget: ' + \
+                        'Last round. Spending remaining epsilon budget: '  + \
                         f'{remaining_budget}', output_flag)
                     eps = remaining_budget / samples_len
 
@@ -227,7 +227,7 @@ def run_experiment(true_image,
         if collapse_func:
             collapse_threshold = collapse_func(threshold)
         print_output(
-            f'Level: {i}. Eps: {eps}. Threshold: {threshold:.2f}. ', output_flag)
+            f'Level: {i}. Eps: {eps}. Threshold: {threshold:.2f}. Remaining: {remaining_budget/samples_len if remaining_budget is not None else 0:.2f}', output_flag)
 
         # to prevent OOM errors we use vectors of size partial.
         if start_with_level > i:
@@ -269,7 +269,7 @@ def run_experiment(true_image,
             top_k=top_k,
             total_size=total_size)
         result.metric = metric
-        print_output(f'Level: {i}. MSE without sampling error: {metric.mse:.2e}', output_flag)
+        print_output(f'Level: {i}. MSE: {result.sampled_metric.mse:.2e}, without sampling error: {metric.mse:.2e}.', output_flag)
         if i==0 or not last_result_ci:
             last_result = None
         else:
@@ -284,7 +284,7 @@ def run_experiment(true_image,
     if output_flag:
         print(f'Total epsilon-users: {spent_budget:.2f} with ' + \
               f'{spent_budget / level_sample_size:.2f} eps per person. ')
-        _, ax = plt.subplots(
+        fig, ax = plt.subplots(
             1, len(per_level_results),
             figsize=(len(per_level_results) * 10, 10))
         _, ax_contour = plt.subplots(
@@ -305,6 +305,7 @@ def run_experiment(true_image,
             axis_contour.axes.xaxis.set_visible(False)
             axis_contour.axes.yaxis.set_visible(False)
             axis_contour.imshow(per_level_grid[i])
+        fig.savefig('results.pdf')
         if save_gif:
             images = [result.image for result in per_level_results]
             plotting.save_gif(images, path='/gif_image/')
