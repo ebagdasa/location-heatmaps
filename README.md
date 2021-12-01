@@ -7,5 +7,4 @@ Here is the example of the algorithm running on NYC location map from
 
 ![Alt Text](animation.gif)
 
-To experiment with the code there is a working [notebook]
-(dp_location_heatmaps.ipynb).
+To experiment with the code there is a working [notebook](dp_location_heatmaps.ipynb).
