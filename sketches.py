@@ -69,3 +69,20 @@ def gpu_hash_function(j, rand):
         return value
 
     return my_hash
+
+
+def get_count_min_sketch(depth=20, width=2000):
+    """
+    Return count-min sketch.
+
+    Args:
+        depth:
+        width:
+
+    Returns:
+
+    """
+    hash_functions = [hash_function(i) for i in range(depth)]
+    sum_sketch = CountMinSketch(depth, width, hash_functions)
+
+    return sum_sketch
